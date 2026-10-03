@@ -1,0 +1,176 @@
+---
+title: "Practical 4 Answers"
+format: html
+echo: false
+---
+
+# General Linear Models (GLMs): Working with categorical variables.
+
+-Fit and interpret one-way ANOVA and ANCOVA models in R.\\
+-Construct and apply contrast coding systems.\\
+-Compare and interpret additive and interaction GLM models with factors.
+
+```{r}
+library(dplyr) 
+library(readr) # read_csv().
+library(ggplot2)
+
+crickets <- read_csv("data/crickets.csv")
+crickets
+```
+
+# Question 1
+Recreate the plot above using a colour scale for the species rather than plotting on separate facets.
+```{r}
+crickets |> 
+  ggplot(aes(x = temp, y = rate, color = species)) +
+  geom_point() +
+  scale_x_continuous("Temperature (°C)") +
+  scale_y_continuous("Chirp rate") +
+  scale_colour_discrete("Species") +
+  ggtitle("Cricket chirp rate vs temperature by species") +
+  theme_bw()
+```
+**Colouring by species (rather than faceting) makes it much easier to see how the two species compare**
+
+# Question 2
+Fit the one-way ANOVA model rate ~ species.
+```{r}
+  anova_mod <- lm(rate~species, data = crickets) 
+  summary(anova_mod)
+```
+**Note: A one-way ANOVA is a linear regression where the predictor is categorical.**
+
+# Question 3
+Which level of species has been chosen as the reference category? How can you tell from the lm() output?
+
+O.exclamationis is the reference category. **In R, lm() defaults to treatment (dummy) coding for factors, which**
+**makes the first level of the factors as the baseline. Since it is dummy coding**
+$\beta_0$ or (Intercept) is the mean estimate for the reference group (O.exclamationis). 
+$\beta _1$ or (speciesO.niveus) is the mean difference between speciesO.niveus and the reference group.
+
+# Question 4
+Write out the full fitted model equation, defining all terms clearly.
+
+$$\mathrm{rate}_i= 85.59 - 23.16 \times [\mathrm{species}_i = \mathrm{O.niveus}]$$
+
+$\mathrm{rate}_i$ is the predicted chirp rate for observation $i$.
+$1[\cdot]$ is an indicator function that is $1$ if cricket $i$ is O.$\mathrm{niveus}$ and 0 if not.(O.$\mathrm{exlamationis}$) is the reference level.
+
+The mean rate for O.$\mathrm{exlamationis}$ is 85.59 and the mean rate for O.$\mathrm{niveus}$ is 23.16 lower, which is
+$85.59 - 23.16 = 62.43$.
+
+# Question 5
+Calculate the estimated mean rate for each species using only the summary of the model. Confirm your results with the predict() function.
+
+```{r}
+# using coefficients
+intercept <- coefficients(anova_mod)["(Intercept)"]
+niveus_offset <- coefficients(anova_mod)["speciesO. niveus"]
+
+exclamationis_mean <- intercept
+niveus_mean <- intercept + niveus_offset # intercept - 23.16
+
+c(exclaimationis = exclamationis_mean, niveus = niveus_mean) # displays the reference group and estimated mean
+```
+```{r}
+# Confirm with predict()
+predict(anova_mod, newdata = tibble(species = c("O. exclamationis", "O. niveus")))
+```
+**Both approaches agree: an estimated mean chirp rate of 85.59 for O. exclamationis and 62.43 for O. niveus. These are each species’ raw sample mean, since a one-way ANOVA with a single categorical predictor and no other covariates estimates group means directly.**
+
+# Question 6
+Refit the model without a reference category. What sort of coding is this? Are the results the same?
+
+```{r}
+anova_mod_nointercept <- lm(rate~species-1,data = crickets)
+summary(anova_mod_nointercept)
+```
+**Removing the intercept (by including - 1) switches from treatment/dummy coding to means/cell-means coding.**
+
+Comparing the two: **treatment/dummy coding**: intercept (reference) plus an offset(s).
+**means coding**: each level of species gets its own coefficient, which is that group’s mean.
+
+Note that the underlying model (including fitted values, residuals, $R^2$) is identical. The only change is the parameterisation.**
+
+# Question 7
+Add the temperature term to the regression. Write out the mathematical equation for this model. Is this an additive ANCOVA model?
+
+```{r}
+  ancova_mod <- lm(rate ~ species + temp, data = crickets)
+  summary(ancova_mod)
+```
+$$\mathrm{rate}_i= \beta_0 + \beta_1 \times \mathrm{temp}_i + \beta_2 \times 1 [\mathrm{species}_i = \mathrm{O.niveus}] + \epsilon_i$$
+where $\epsilon_i \sim N(0,\sigma^2)$ is the error term. 
+
+The fitted model is
+$$\mathrm{rate}_i = -7.21 + 3.60 \times \mathrm{temp}_i - 10.07 \times 1[\mathrm{species}_i = \mathrm{O.niveus}]$$
+
+Yes, even though we fitted using lm, this is an **additive ANCOVA model** with **one continuous covariate (temp)**, **one categorical factor (species)**, and **no interaction** between them. **Geometrically**, it fits two parallel regression lines (**one per species**) that **share a common slope** (3.60 chirps/°C) but **have different intercepts, offset by a constant 10.07 chirps**.
+
+# Question 8
+Plot the predictions of the model with an additive effect over the data. Is there evidence that the additive effect should be an interaction? Check by fitting the interaction model.
+
+```{r}
+crickets |> 
+  mutate(pred_additive = predict(ancova_mod)) |>
+  ggplot(aes(x = temp, y = rate, color = species)) +
+  geom_point() +
+  scale_x_continuous("Temperature (°C)") +
+  scale_y_continuous("Chirp rate") +
+  scale_colour_discrete("Species") +
+  geom_line(aes(y = pred_additive)) +
+  ggtitle("Additive ANCOVA fit") +
+  theme_bw()
+```
+
+Now fitting the interaction model
+```{r}
+interaction_mod <- lm(rate ~ species * temp, data = crickets)
+summary(interaction_mod)
+```
+
+Compare models using ANOVA()
+```{r}
+ anova(ancova_mod, interaction_mod)
+```
+
+The p value of this test indicates that the interaction is not needed. Formally, **the null hypothesis $H_0: \beta_3 = 0$ where $\beta_3$ is for the interaction effect** of temp:speciesO.niveus, **is not rejected at the $\alpha = 0.05$ level since $0.2542 > 0.05$.**
+
+Visually, the two **parallel** lines from the additive model already track each species’ points closely, and there’s no obvious systematic pattern that would suggest the slopes genuinely differ.
+
+# Question 9
+Why might a linear model be inappropriate for the data?
+
+Though the linear ANCOVA fits this particular dataset very well $R^2 \approx 0.99$
+**Chirp rate can’t be negative**, but a linear model will predict negative values of chirp rate for temperatures that are low enough.
+
+Careful use of the model (which is a very good predictor) will avoid any problems with this.
+
+# Question 10
+Fit each of the above GLMs and interpret the coefficients of the regression.
+```{r}
+model_wool <- glm(breaks ~ wool, data = warpbreaks, family = poisson(link = "log"))
+model_tension <- glm(breaks ~ tension, data = warpbreaks, family = poisson(link = "log"))
+model_wool_tension_add <- glm(breaks ~ wool + tension, data = warpbreaks, family = poisson(link = "log"))
+
+summary(model_wool)
+summary(model_tension)
+summary(model_wool_tension_add)
+```
+On the log scale, wool As mean is 3.435; wool Bs mean is 0.206 lower. Exponentiating to get back to count scales, 31.0 mean breaks for wool A, 0.814 times fewer breaks for wool B (18.6%). 
+The wool and tension coefficients are (as expected for an additive model) essentially unchanged from their single-predictor models. The effects (additive on log scale, multiplicative on raw/count scale) are interpreted holding the other factors fixed: at any given tension, wool B has 18.6% fewer breaks than wool A; at any given wool, Medium tension has 27% less breaks than Low whilst Medium has 40% less.
+
+# Question 11
+Write out the fitted model equations.
+
+for model_wool,
+$$\mathrm{log(breaks)}_i = 3.435 - 0.206 \times 1[\mathrm{wool}_i = B]$$
+
+for model_tension
+$$\mathrm{log(breaks)}_i = 3.594 - 0.321 \times 1[\mathrm{tension}_i = M] - 0.519 \times 1[\mathrm{tension}_i = H]$$
+
+for model_wool_tension_add
+$$\mathrm{log(breaks)}_i = 3.692 - 0.206 \times 1 [\mathrm{wool_i} = B] - 0.321 \times 1[\mathrm{tension_i} = M] - 0.519 \times 1 [\mathrm{tension}_i = H]$$
+
+with reference levels $\mathrm{wool}_i = A$ and $\mathrm{tension}_i = L$ in each case. Can be written without the log by exponentiating.
